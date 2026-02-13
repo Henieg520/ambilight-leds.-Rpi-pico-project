@@ -2,7 +2,7 @@
 #include <Adafruit_NeoPixel.h>
 
 #define NUM_LEDS_A 100
-#define NUM_LEDS_B 10
+#define NUM_LEDS_B 25
 
 #define PIN_A 18
 #define PIN_B 19

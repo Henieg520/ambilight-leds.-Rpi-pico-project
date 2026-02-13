@@ -20,7 +20,10 @@ brightness = 0.1
 
 PC_NUM_LEDS = 25
 PC_START = 0xBB
+
 stop_flag = threading.Event()
+current_effect = None
+effect_lock = threading.Lock()
 
 GAMMA_LUT = np.array(
     [int(((i / 255.0) ** (1.0 / GAMMA)) * 255) for i in range(256)],
@@ -43,6 +46,7 @@ def main():
     
     threading.Thread(target=serial_writer, daemon=True).start()
     threading.Thread(target=pc_led, daemon=True).start()
+    threading.Thread(target=effects, daemon=True).start()
     prefered_frame_time = 1.0 / FPS
 
     while not stop_flag.is_set():
@@ -105,14 +109,20 @@ def main():
     print("LEDs wyłączone.")
 
 def pc_led():
+    global current_effect
     while True:
         key_pressed = input("Podaj tryb: ")
         colors = None
         match key_pressed:
             case "white":
+                with effect_lock:
+                    current_effect = None
                 colors = [50 for i in range(PC_NUM_LEDS*3)]
             case "stop":
                 stop_flag.set()
+            case "rainbow":
+                with effect_lock:
+                    current_effect = "rainbow"
             case _:
                 pass
         
@@ -122,6 +132,44 @@ def pc_led():
 
             put_to_frame_queue(frame)
 
+def effects():
+    color = (0,0,0)
+    hue = 24
+    while not stop_flag.is_set():
+        with effect_lock:
+            effect = current_effect
+
+        match effect:
+            case "pulse":
+                pass
+            case "rainbow":
+                colors = []
+                for i in range(PC_NUM_LEDS):
+                    h = (hue + i * 360 / PC_NUM_LEDS) % 360
+                    c = 1.0
+                    x = c * (1 - abs((h / 60) % 2 - 1))
+                    
+                    if h < 60:
+                        r, g, b = c, x, 0
+                    elif h < 120:
+                        r, g, b = x, c, 0
+                    elif h < 180:
+                        r, g, b = 0, c, x
+                    elif h < 240:
+                        r, g, b = 0, x, c
+                    elif h < 300:
+                        r, g, b = x, 0, c
+                    else:
+                        r, g, b = c, 0, x
+                    
+                    colors.extend([int(r * 50), int(g * 50), int(b * 50)])
+                
+                payload = bytes(colors)
+                frame = gen_frame(PC_START, payload)
+                put_to_frame_queue(frame)
+                
+                hue = (hue + 5) % 360
+                time.sleep(0.02)
 
 
 def put_to_frame_queue(frame):
