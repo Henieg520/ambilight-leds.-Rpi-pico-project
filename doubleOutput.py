@@ -7,6 +7,8 @@ import threading
 import queue
 from math import sqrt 
 from os import _exit
+import random
+
 SHIFT = 0
 NUM_LEDS = 100
 COM_PORT = "COM8"       
@@ -16,7 +18,7 @@ FPS = 20
 GAMMA = 2.4
 SATURATION_BOOST = 3
 MAX_BRIGHTNESS = 255
-brightness = 0.1
+brightness = 0.3
 
 PC_NUM_LEDS = 25
 PC_START = 0xBB
@@ -41,9 +43,9 @@ def main():
     y_idx, x_idx = get_samples()
     
     sct = mss()
-    sct.with_cursor = False
     monitor = sct.monitors[1]
-    
+    sct.with_cursor = False
+
     threading.Thread(target=serial_writer, daemon=True).start()
     threading.Thread(target=pc_led, daemon=True).start()
     threading.Thread(target=effects, daemon=True).start()
@@ -117,24 +119,28 @@ def pc_led():
             case "white":
                 with effect_lock:
                     current_effect = None
-                colors = [50 for i in range(PC_NUM_LEDS*3)]
+                colors = [255 for i in range(PC_NUM_LEDS*3)]
             case "stop":
                 stop_flag.set()
             case "rainbow":
                 with effect_lock:
                     current_effect = "rainbow"
+            case "shoot":
+                with effect_lock:
+                    current_effect = "shoot"
             case _:
                 pass
         
         if colors != None:
-            payload = bytes(colors)
-            frame = gen_frame(PC_START, payload)
+            frame = gen_frame(PC_START, colors)
 
             put_to_frame_queue(frame)
 
 def effects():
     color = (0,0,0)
-    hue = 24
+    hue = 0
+    ammo = 0
+    max_fps = 40
     while not stop_flag.is_set():
         with effect_lock:
             effect = current_effect
@@ -142,6 +148,27 @@ def effects():
         match effect:
             case "pulse":
                 pass
+            case "shoot":
+                for ammo in range(0,PC_NUM_LEDS*3,3):
+                    colors = [0 for _ in range(PC_NUM_LEDS*3)]
+                    
+                    colors[ammo] = 255
+
+                    if ammo >= 6:
+                        colors[ammo-6] = 55
+                        colors[ammo-3] = 128
+                    elif ammo >=3:
+                            colors[ammo-3] = 55
+                    else:
+                        pass
+                    
+                    frame = gen_frame(PC_START, colors)
+                    put_to_frame_queue(frame)
+                    time.sleep(1/6/(ammo+5))
+
+                frame = gen_frame(PC_START, [0 for _ in range(PC_NUM_LEDS*3)])
+                put_to_frame_queue(frame)    
+                time.sleep(random.randrange(500,1000)/1000)
             case "rainbow":
                 colors = []
                 for i in range(PC_NUM_LEDS):
@@ -163,14 +190,14 @@ def effects():
                         r, g, b = c, 0, x
                     
                     colors.extend([int(r * 50), int(g * 50), int(b * 50)])
-                
-                payload = bytes(colors)
-                frame = gen_frame(PC_START, payload)
+
+                frame = gen_frame(PC_START, colors)
                 put_to_frame_queue(frame)
                 
                 hue = (hue + 5) % 360
-                time.sleep(0.02)
-
+                time.sleep(1/max_fps)
+            case _:
+                pass
 
 def put_to_frame_queue(frame):
     try:
@@ -184,11 +211,17 @@ def put_to_frame_queue(frame):
 
 
 def gen_frame(start, payload):
+    try:
         header = struct.pack('<BH', start, len(payload))
         crc = bytes([crc8(payload)])
         full_frame = header + payload + crc
         return full_frame
-
+    except:
+        payload = bytes(payload)
+        header = struct.pack('<BH', start, len(payload))
+        crc = bytes([crc8(payload)])
+        full_frame = header + payload + crc
+        return full_frame
 def serial_writer():
     while True:
         frame = frame_queue.get()
